@@ -17,7 +17,9 @@ struct TouchOTPMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let vault = Vault()
+    private let vault = CommandLine.arguments.contains("--render-preview")
+        ? Vault(previewAccounts: CommandLine.arguments.contains("--preview-empty") ? [] : PreviewSupport.accounts)
+        : Vault()
     private let shortcut = GlobalShortcut()
     private var statusItem: NSStatusItem!
     private var window: NSWindow?
@@ -38,10 +40,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if let argument = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > argument + 1 {
-            let view = NSHostingView(rootView: ManagerView(vault: vault, shortcutAvailable: true))
-            let previewWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 930, height: 650), styleMask: [.borderless], backing: .buffered, defer: false)
+            let appearance: ColorScheme = CommandLine.arguments.contains("--preview-dark") ? .dark : .light
+            let root: AnyView
+            if CommandLine.arguments.contains("--preview-review") {
+                root = AnyView(ImportView(vault: vault, previewCollector: PreviewSupport.importCollector).preferredColorScheme(appearance))
+            } else if CommandLine.arguments.contains("--preview-complete") {
+                root = AnyView(ImportView(vault: vault, previewImported: true).preferredColorScheme(appearance))
+            } else if CommandLine.arguments.contains("--preview-import") {
+                root = AnyView(ImportView(vault: vault).preferredColorScheme(appearance))
+            } else if CommandLine.arguments.contains("--preview-setup") {
+                root = AnyView(SetupView(shortcutAvailable: true).preferredColorScheme(appearance))
+            } else {
+                root = AnyView(ManagerView(vault: vault, shortcutAvailable: true).preferredColorScheme(appearance))
+            }
+            let view = NSHostingView(rootView: root)
+            let size = CommandLine.arguments.contains("--preview-compact") ? NSSize(width: 780, height: 570) : NSSize(width: 900, height: 650)
+            let previewWindow = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+            previewWindow.appearance = NSAppearance(named: appearance == .dark ? .darkAqua : .aqua)
             previewWindow.contentView = view
-            view.frame = NSRect(x: 0, y: 0, width: 930, height: 650)
+            view.frame = NSRect(origin: .zero, size: size)
             view.layoutSubtreeIfNeeded()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -80,7 +97,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = NSHostingController(rootView: ManagerView(vault: vault, shortcutAvailable: shortcutAvailable))
             let created = NSWindow(contentViewController: controller)
             created.title = "TouchOTP"
-            created.setContentSize(NSSize(width: 930, height: 650))
+            created.setContentSize(NSSize(width: 900, height: 650))
+            created.contentMinSize = NSSize(width: 780, height: 570)
+            created.titlebarAppearsTransparent = true
+            created.toolbarStyle = .unified
             created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             created.isReleasedWhenClosed = false
             created.center()
@@ -177,20 +197,26 @@ struct AccountChooser: View {
     let cancel: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Which account?").font(.headline)
+            Text("Choose an account").font(.headline)
+            Text("Confirm with Touch ID next.").font(.caption).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(accounts) { account in
                         Button { select(account) } label: {
-                            VStack(alignment: .leading) {
-                                Text(account.issuer).font(.headline)
-                                Text(account.username).font(.caption)
+                            HStack(spacing: 10) {
+                                AccountSymbol(issuer: account.issuer, size: 30)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(account.issuer).font(.system(size: 13, weight: .medium))
+                                    Text(account.username).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.buttonStyle(.bordered)
                     }
                 }
             }
             Button("Cancel", action: cancel)
-        }.padding(20).frame(width: 350, height: 220)
+        }.padding(20).frame(width: 350, height: 230)
     }
 }
