@@ -18,7 +18,10 @@ targets:
   TouchOTP:
     type: application
     platform: macOS
-    sources: [Sources/TouchOTP]
+    sources:
+      - Sources/TouchOTP
+      - path: Resources/TouchOTP.icns
+        buildPhase: resources
     dependencies:
       - target: TouchOTPCore
     settings:

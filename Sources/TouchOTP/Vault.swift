@@ -7,18 +7,22 @@ final class Vault: ObservableObject {
     @Published private(set) var accounts: [AccountRecord] = []
     @Published var loadError: String?
     private let file: URL
+    private let previewMode: Bool
     private let store = LARightStore.shared
     private var mutating = false
 
     private func beginMutation() throws {
+        guard !previewMode else { throw OTPError("Preview accounts cannot be changed.") }
         guard !mutating else { throw OTPError("Another account change is still in progress. Please try again when it finishes.") }
         guard loadError == nil else { throw OTPError(loadError!) }
         mutating = true
     }
 
-    init() {
+    init(previewAccounts: [AccountRecord]? = nil) {
+        previewMode = previewAccounts != nil
         file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TouchOTP/accounts.json")
+        if let previewAccounts { accounts = previewAccounts; return }
         do {
             if FileManager.default.fileExists(atPath: file.path) {
                 accounts = try JSONDecoder().decode([AccountRecord].self, from: Data(contentsOf: file))
@@ -52,6 +56,7 @@ final class Vault: ObservableObject {
     }
 
     func unlock(_ record: AccountRecord, reason: String) async throws -> ProtectedAccount {
+        guard !previewMode else { throw OTPError("Preview accounts have no stored secrets.") }
         try Self.checkBiometry()
         let right = try await store.right(forIdentifier: "account-" + record.secretID)
         do {

@@ -2,6 +2,12 @@
 
 A local macOS menu-bar authenticator. Focus an empty verification-code field, press **Control + Option + Command + O** (`⌃⌥⌘O`), and authenticate with Touch ID. TouchOTP matches an account to the current website or native app and types its current TOTP code.
 
+Version **0.2.0** introduces a native Mac interface: searchable accounts, a protected code panel with an expiry countdown, named app destinations, and a scan → review → setup import flow. Destination changes stay in a draft until you save with Touch ID; switching accounts offers to keep or discard unsaved changes. The interface follows the Mac's light/dark appearance and accent color, and includes a dedicated Autofill setup sheet and app icon.
+
+![TouchOTP account screen with synthetic sample accounts](docs/ui/account-light.png)
+
+[Dark appearance at the compact window size](docs/ui/account-dark.png). These previews use sample accounts, never real account data.
+
 This is a **development prototype**, built on this Mac on October 6, 2026. It is not a notarized distribution release. Automated tests and protected-storage diagnostics pass. The user confirmed successful OpenVPN Connect autofill with Touch ID using version 0.1.4 on October 6, 2026; browser autofill and other apps still need manual verification.
 
 Version 0.1.1 fixes an import compatibility bug: Google migration exports with omitted or unspecified algorithm, digit-count or OTP-type settings now use the standard SHA-1, six-digit TOTP defaults. Explicit unsupported algorithms and HOTP are still rejected. Scan errors now distinguish a decoded QR whose account data was rejected from a camera that has not detected a QR.
@@ -17,10 +23,10 @@ The reported post-Touch-ID “app, page or focused field changed” failure stop
 ## First use
 
 1. Open `~/Applications/TouchOTP.app` (or `build/TouchOTP.app`). The fingerprint icon stays in the menu bar when you close the window.
-2. Click **Test Touch ID…**. This saves, unlocks and removes a disposable test secret. No account import is needed for this test.
+2. Open **Autofill setup** using the gear at the bottom of the sidebar (or **⌘,**) and click **Test Touch ID**. This saves, unlocks and removes a disposable test secret. No account import is needed for this test.
 3. Enable TouchOTP under **System Settings → Privacy & Security → Accessibility** when requested. This permission allows reading the focused field and inserting text. Each supported browser also asks for **Automation** permission to read its active tab URL.
 4. Click **Import accounts**. On your phone, open Google Authenticator → Transfer accounts → Export accounts. Select accounts and scan every export QR using the Mac camera. Camera access is requested only when scanning. You can also choose a local QR image or enter an `otpauth://` setup link. Never send export QR codes or setup keys in chat.
-5. Select an imported account and set its destinations. Website entries must be **exact login hostnames**, such as `accounts.google.com` or `github.com`. For native apps, click **Choose application…**. Save destinations with Touch ID.
+5. Review the scanned accounts, click **Import**, then **Set up autofill**. Select an account and click **Add website** or **Choose app…**. Website entries must identify the **exact login hostname**, such as `accounts.google.com` or `github.com`; a pasted HTTPS login URL is reduced to its hostname. Click **Save changes** and confirm with Touch ID. Mac app rows show the installed app's name and icon.
 6. Return to the login, focus an **empty ordinary OTP field**, and press **⌃⌥⌘O**. Check the account and destination named in the Touch ID prompt. TouchOTP inserts the code after successful authentication. It does not press Return or click Submit; a website may submit automatically when its field becomes complete.
 
 Google Authenticator remains usable. TouchOTP generates codes from the imported secret independently; it does not read your phone remotely or connect to Google Authenticator cloud sync. New or rotated secrets must be imported again. Keep your phone and account recovery codes.
@@ -75,13 +81,15 @@ To test protected storage without using a fingerprint or any real account:
 build/TouchOTP.app/Contents/MacOS/TouchOTP --storage-check
 ```
 
-This creates a synthetic protected secret, verifies that an unauthorized read fails, and removes the fixture. `--render-preview /absolute/path/preview.png` renders only the app's own onboarding view for UI inspection; it does not capture the desktop.
+This creates a synthetic protected secret, verifies that an unauthorized read fails, and removes the fixture. `--render-preview /absolute/path/preview.png` renders the app with read-only sample accounts, without loading real account metadata or secrets. Preview switches include `--preview-empty`, `--preview-dark`, `--preview-compact`, `--preview-import`, `--preview-review`, `--preview-complete`, and `--preview-setup`. It does not capture the desktop. The original vector app icon is reproducible with `swift scripts/generate-icon.swift build/TouchOTP.iconset` followed by `iconutil -c icns build/TouchOTP.iconset -o Resources/TouchOTP.icns`.
 
 ## Validation
 
 Automated tests cover all 18 RFC 6238 SHA-1/SHA-256/SHA-512 reference vectors, RFC 4226 six-digit values, Base32 decoding, standard and Google migration imports, multi-QR ordering/deduplication, malformed/fuzzed payloads, control-character rejection, exact-host/phishing cases, bundle IDs, and protected metadata round trips. See `Tests/TouchOTPCoreTests`.
 
 `Tests/TouchOTPTests` covers delayed Electron field availability, focused-window fallback, cancellation when focus changes, rejection of another process's field/window, bounded retries, and recognition of OpenVPN's masked code dialog without reading other input values. It also checks rejection of password prompts, ambiguous dialogs, and nonempty or unverifiably empty masked fields.
+
+Version 0.2.0 passes 45 automated tests, including website-address normalization, invalid/duplicate destination rejection, draft isolation, and preview storage isolation. Account, onboarding, import, review, completion, and setup views were inspected using synthetic renders in light/dark mode and at the compact window size. Live camera and Touch ID interactions still require manual interaction.
 
 Manual acceptance checks still required:
 
