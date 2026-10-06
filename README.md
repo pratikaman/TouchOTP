@@ -1,0 +1,104 @@
+# TouchOTP
+
+A local macOS menu-bar authenticator. Focus an empty verification-code field, press **Control + Option + Command + O** (`⌃⌥⌘O`), and authenticate with Touch ID. TouchOTP matches an account to the current website or native app and types its current TOTP code.
+
+This is a **development prototype**, built on this Mac on October 6, 2026. It is not a notarized distribution release. Automated tests and protected-storage diagnostics pass. The user confirmed successful OpenVPN Connect autofill with Touch ID using version 0.1.4 on October 6, 2026; browser autofill and other apps still need manual verification.
+
+Version 0.1.1 fixes an import compatibility bug: Google migration exports with omitted or unspecified algorithm, digit-count or OTP-type settings now use the standard SHA-1, six-digit TOTP defaults. Explicit unsupported algorithms and HOTP are still rejected. Scan errors now distinguish a decoded QR whose account data was rejected from a camera that has not detected a QR.
+
+Version 0.1.2 fixes the reported “unsupported version (2)” error by accepting version 2 migration envelopes. Existing account and batch validation still applies. Regression tests cover synthetic version 2 single-QR and multi-QR exports, additive metadata, and invalid account settings. After a real import, compare one generated code with Google Authenticator to verify your accounts.
+
+Version 0.1.3 adds Electron Accessibility activation and a short asynchronous wait for the focused field, addressing the reported OpenVPN Connect field-discovery error. It also supports OpenVPN's masked challenge field when a small enclosing MFA dialog explicitly asks for an authenticator/verification code and contains only that text input. The field must still be verifiably empty. Focus changes cancel the request. Automated tests use synthetic Accessibility trees; an actual OpenVPN login with Touch ID remains a manual check.
+
+Version 0.1.4 avoids repeating Electron Accessibility activation when it is already enabled or when checking the target after Touch ID. A local `last-fill-diagnostic.json` records only the latest attempt's stage, outcome, and boolean focus comparisons. It contains no codes, secrets, account names, URLs, UI text, or textbox contents; it stays in the TouchOTP Application Support directory and is overwritten on each completed attempt.
+
+The reported post-Touch-ID “app, page or focused field changed” failure stopped after this change. The successful OpenVPN attempt recorded matching app, URL, window, and field, and the user confirmed the code filled. All 40 automated tests pass in this version.
+
+## First use
+
+1. Open `~/Applications/TouchOTP.app` (or `build/TouchOTP.app`). The fingerprint icon stays in the menu bar when you close the window.
+2. Click **Test Touch ID…**. This saves, unlocks and removes a disposable test secret. No account import is needed for this test.
+3. Enable TouchOTP under **System Settings → Privacy & Security → Accessibility** when requested. This permission allows reading the focused field and inserting text. Each supported browser also asks for **Automation** permission to read its active tab URL.
+4. Click **Import accounts**. On your phone, open Google Authenticator → Transfer accounts → Export accounts. Select accounts and scan every export QR using the Mac camera. Camera access is requested only when scanning. You can also choose a local QR image or enter an `otpauth://` setup link. Never send export QR codes or setup keys in chat.
+5. Select an imported account and set its destinations. Website entries must be **exact login hostnames**, such as `accounts.google.com` or `github.com`. For native apps, click **Choose application…**. Save destinations with Touch ID.
+6. Return to the login, focus an **empty ordinary OTP field**, and press **⌃⌥⌘O**. Check the account and destination named in the Touch ID prompt. TouchOTP inserts the code after successful authentication. It does not press Return or click Submit; a website may submit automatically when its field becomes complete.
+
+Google Authenticator remains usable. TouchOTP generates codes from the imported secret independently; it does not read your phone remotely or connect to Google Authenticator cloud sync. New or rotated secrets must be imported again. Keep your phone and account recovery codes.
+
+If multiple imported accounts share a destination, a small account chooser appears before Touch ID. If no account matches, the error identifies the exact destination to add. Account names never automatically authorize a hostname.
+
+## Coverage and limits
+
+| Destination | Integration implemented |
+| --- | --- |
+| Safari and Safari Technology Preview | Active tab URL through Apple Events; focused web area checked through Accessibility |
+| Chrome, Edge, Brave, Arc, Vivaldi, Opera | Chromium active-tab scripting API; focused web area checked through Accessibility |
+| Firefox and other browsers | Only when Accessibility exposes both the active document URL and focused web-area URL; otherwise filling is refused |
+| Native Mac apps | Explicit bundle-ID mapping and an exposed, empty Accessibility text field |
+
+These integrations have **not yet been manually verified across all named apps**. Browser versions and custom controls vary. Embedded login frames, secure password-style OTP fields, some split-digit widgets and apps that ignore Unicode keyboard events may require manual entry using **Show code with Touch ID**. The app refuses unverifiable browser destinations rather than treating the whole browser as a trusted native app.
+
+For **OpenVPN Connect**, select the imported VPN account, choose OpenVPN Connect as its Mac app destination, and save with Touch ID. Focus its empty **Authenticator Code** box and press **⌃⌥⌘O**. Masked-field recognition currently requires the English “Multi-factor authentication” heading and an authenticator/verification/one-time-code prompt in that field's enclosing dialog. Other languages, hidden field contents with no character count, or unrecognized dialogs require **Show code with Touch ID**.
+
+The shortcut intentionally starts each request. TouchOTP does not continuously watch your screen or start biometric prompts whenever a webpage focuses an input. It reads the target on demand and matches it automatically against your saved destinations.
+
+Only time-based codes (TOTP), SHA-1/SHA-256/SHA-512, and 6/8 digits are supported. Counter-based HOTP, SMS/email codes, push approvals, OAuth access tokens, passkeys and proprietary authenticators are outside this build. Google migration imports use the format's standard 30-second period; ordinary `otpauth` links also support custom periods. Existing issuer/username pairs are skipped during import, so remove a stale entry before importing a replacement secret.
+
+## Storage and behavior
+
+- Secrets and a protected copy of their destination mappings are stored through Apple's `LARightStore`, with `.biometryCurrentSet`. Keychain storage and its Secure Enclave key enforce biometric authorization. Every operation uses a fresh right and deauthorizes it after the read.
+- Account names, usernames, record IDs and allowed destinations are stored in `~/Library/Application Support/TouchOTP/accounts.json`. This metadata contains **no OTP seed**. After authentication, it must match the protected record before a code can be generated or filled.
+- No network client, analytics, screenshot collection, clipboard automation or remote server is included. Camera frames and decoded import material are processed in memory. A QR image you choose remains wherever you originally saved it; the app does not delete user files.
+- Codes are generated after successful authentication. Near expiry, the app waits briefly for a fresh code. It rechecks the app, window, complete URL and focused empty field before sending a text event to the target process. There is no atomic cross-process “check URL and insert” API, so a small race remains; this is one reason to validate the prototype on your actual apps.
+- Website matches are exact HTTPS hostnames on the default HTTPS port. Subdomains, lookalike domains and alternate ports are not automatically trusted. Native mappings identify an app by bundle identifier; they are not an attestation of that app's publisher.
+- Adding or removing fingerprints invalidates existing secrets protected with the old biometric set. Remove the old TouchOTP account using your currently enrolled fingerprint, then reimport it from your phone. There is no password fallback or secret-export function in this build.
+- The raw seed necessarily exists briefly in this process's memory during import/code generation. Swift does not guarantee that every copy is immediately zeroed; the app does not claim otherwise.
+
+## Build, renew and install
+
+Requirements: macOS 13+, a Mac with Touch ID, Xcode, XcodeGen, and a development account signed in to Xcode. There are no third-party Swift packages.
+
+```sh
+cd /Users/pratikaman/Downloads/TouchOTP
+swift test
+./scripts/build.sh
+./scripts/install.sh
+```
+
+**The current personal-team provisioning profile expires October 13, 2026.** Rebuild and reinstall before/after expiry to renew it. The build uses this Mac's personal development team, not an organization team, and Xcode manages its app identifier and development profile. On a different team, set `TOUCHOTP_DEVELOPMENT_TEAM` before building. Keep the same bundle ID and signing team when upgrading to retain protected-storage access. A durable distributed version needs appropriate Apple distribution signing/provisioning and notarization; this prototype does not configure them.
+
+`TouchOTP.xcodeproj` is generated from `project.yml` and can also be opened in Xcode. The script's `-allowProvisioningUpdates` permits Xcode to renew development provisioning with the account already signed in. Plain `swift build` compiles the code but does **not** produce a provisioned app capable of storing secrets.
+
+To test protected storage without using a fingerprint or any real account:
+
+```sh
+build/TouchOTP.app/Contents/MacOS/TouchOTP --storage-check
+```
+
+This creates a synthetic protected secret, verifies that an unauthorized read fails, and removes the fixture. `--render-preview /absolute/path/preview.png` renders only the app's own onboarding view for UI inspection; it does not capture the desktop.
+
+## Validation
+
+Automated tests cover all 18 RFC 6238 SHA-1/SHA-256/SHA-512 reference vectors, RFC 4226 six-digit values, Base32 decoding, standard and Google migration imports, multi-QR ordering/deduplication, malformed/fuzzed payloads, control-character rejection, exact-host/phishing cases, bundle IDs, and protected metadata round trips. See `Tests/TouchOTPCoreTests`.
+
+`Tests/TouchOTPTests` covers delayed Electron field availability, focused-window fallback, cancellation when focus changes, rejection of another process's field/window, bounded retries, and recognition of OpenVPN's masked code dialog without reading other input values. It also checks rejection of password prompts, ambiguous dialogs, and nonempty or unverifiably empty masked fields.
+
+Manual acceptance checks still required:
+
+1. **Test Touch ID…** succeeds; cancelling a prompt produces no code.
+2. Import one account locally and compare **Show code** with the phone.
+3. Link its exact login hostname and successfully fill one real browser OTP field.
+4. Switch tabs, fields or apps during the biometric prompt: filling must stop.
+5. Link and test a native app, and test multiple-account selection where relevant.
+6. Verify a near-expiry code, a rejected destination, and camera scanning with all pages of a multi-QR export.
+
+## References
+
+- [Apple: LARightStore](https://developer.apple.com/documentation/localauthentication/larightstore)
+- [Apple: biometric requirements](https://developer.apple.com/documentation/localauthentication/laauthenticationrequirement)
+- [Apple: keychain implementations and provisioning](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+- [Google: transfer Authenticator accounts](https://support.google.com/accounts/answer/1066447)
+- [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238)
+- [Electron: third-party Accessibility activation](https://github.com/electron/electron/blob/main/docs/tutorial/accessibility.md)
+
+Apple's existing [Passwords verification-code autofill](https://support.apple.com/guide/passwords/automatically-fill-verification-codes-mchl873a6e72/mac) is also an option if you prefer a maintained system solution and its app/browser coverage fits your needs.
