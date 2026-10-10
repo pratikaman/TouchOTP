@@ -128,18 +128,25 @@ public struct Bindings: Codable, Equatable {
 
 public struct AccountRecord: Identifiable, Codable, Equatable {
     public var id: UUID
-    public var secretID: String
     public var issuer: String
     public var username: String
     public var bindings: Bindings
-    public init(id: UUID = UUID(), secretID: String = UUID().uuidString, issuer: String, username: String, bindings: Bindings = Bindings()) {
-        self.id = id; self.secretID = secretID; self.issuer = issuer; self.username = username; self.bindings = bindings
+    public init(id: UUID = UUID(), issuer: String, username: String, bindings: Bindings = Bindings()) {
+        self.id = id; self.issuer = issuer; self.username = username; self.bindings = bindings
     }
 }
 
 // Bindings are authenticated along with the seed, so editing the metadata file cannot redirect a code.
-public struct ProtectedAccount: Codable {
+public struct ProtectedAccount: Codable, Equatable {
     public var record: AccountRecord
     public var otp: OTPSecret
     public init(record: AccountRecord, otp: OTPSecret) { self.record = record; self.otp = otp }
+}
+
+/// Every account's seed and bindings, protected together by one biometric right so a single
+/// Touch ID can show all codes. Versions before 0.3.0 stored one `ProtectedAccount` per right.
+public struct ProtectedVault: Codable, Equatable {
+    public var accounts: [ProtectedAccount]
+    public init(accounts: [ProtectedAccount] = []) { self.accounts = accounts }
+    public var records: [AccountRecord] { accounts.map(\.record) }
 }

@@ -219,4 +219,27 @@ final class TouchOTPCoreTests: XCTestCase {
         var tampered = record; tampered.bindings.hosts = ["evil.example"]
         XCTAssertNotEqual(restored.record, tampered)
     }
+    func testProtectedVaultRoundTripKeepsEveryAccountsBindings() throws {
+        let first = AccountRecord(issuer: "A", username: "a", bindings: Bindings(hosts: ["a.example"]))
+        let second = AccountRecord(issuer: "B", username: "b", bindings: Bindings(bundleIDs: ["com.example.b"]))
+        let vault = ProtectedVault(accounts: [
+            ProtectedAccount(record: first, otp: try OTPSecret(issuer: "A", username: "a", secret: Data([1]))),
+            ProtectedAccount(record: second, otp: try OTPSecret(issuer: "B", username: "b", secret: Data([2])))
+        ])
+        let restored = try JSONDecoder().decode(ProtectedVault.self, from: JSONEncoder().encode(vault))
+        XCTAssertEqual(restored, vault)
+        XCTAssertEqual(restored.records, [first, second])
+        var tampered = restored; tampered.accounts[1].record.bindings.hosts = ["evil.example"]
+        XCTAssertNotEqual(tampered.records, vault.records)
+    }
+    func testLegacyProtectedAccountDecodesWithoutSecretIdentifier() throws {
+        // Records written before 0.3.0 carried a per-account right identifier that the current model ignores.
+        let json = """
+        {"record":{"id":"00000000-0000-0000-0000-000000000001","secretID":"old-right","issuer":"Legacy","username":"user","bindings":{"hosts":["legacy.example"],"bundleIDs":[]}},"otp":{"issuer":"Legacy","username":"user","secret":"AQ==","algorithm":"SHA1","digits":6,"period":30}}
+        """
+        let payload = try JSONDecoder().decode(ProtectedAccount.self, from: Data(json.utf8))
+        XCTAssertEqual(payload.record, AccountRecord(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, issuer: "Legacy",
+                                                      username: "user", bindings: Bindings(hosts: ["legacy.example"])))
+        XCTAssertEqual(payload.otp.secret, Data([1]))
+    }
 }

@@ -28,68 +28,83 @@ struct ManagerView: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 HStack(spacing: 7) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    Image(systemName: "magnifyingglass").foregroundStyle(TouchStyle.muted)
                     TextField("Search accounts", text: $search).textFieldStyle(.plain)
                         .accessibilityLabel("Search accounts")
                     if !search.isEmpty {
-                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(TouchStyle.muted) }
                             .buttonStyle(.plain).help("Clear search").accessibilityLabel("Clear search")
                     }
-                }.padding(8).background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
-                    .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 12)
+                }.padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(TouchStyle.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(TouchStyle.border))
+                    .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 14)
                 HStack {
-                    Text("Accounts").font(.system(size: 11, weight: .semibold))
+                    Text("Accounts").font(.system(size: 11.5, weight: .semibold))
                     Spacer()
-                    Text("\(vault.accounts.count)").font(.system(size: 11)).monospacedDigit()
-                }.foregroundStyle(.secondary).padding(.horizontal, 20).padding(.bottom, 6)
+                    Text("\(vault.accounts.count)").font(.system(size: 11, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .padding(.horizontal, 7).padding(.vertical, 1).background(TouchStyle.well, in: Capsule())
+                }.foregroundStyle(TouchStyle.muted).padding(.horizontal, 20).padding(.bottom, 6)
                 if filtered.isEmpty {
                     VStack(spacing: 8) {
-                        Image(systemName: search.isEmpty ? "key.horizontal" : "magnifyingglass").font(.title2).foregroundStyle(.tertiary)
+                        Image(systemName: search.isEmpty ? "key.horizontal" : "magnifyingglass").font(.title2).foregroundStyle(TouchStyle.faint)
                         Text(search.isEmpty ? "Your accounts will appear here" : "No matching accounts")
-                            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            .font(.caption).foregroundStyle(TouchStyle.muted).multilineTextAlignment(.center)
                     }.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List(filtered, selection: selection) { account in
-                        HStack(spacing: 10) {
-                            AccountSymbol(issuer: account.issuer)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(account.issuer).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                                Text(account.username).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    // A custom list instead of `List(selection:)`, whose system highlight ignores the palette.
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(filtered) { account in
+                                SidebarRow(account: account, selected: account.id == selected)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { select(account.id) }
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityAddTraits(account.id == selected ? [.isButton, .isSelected] : .isButton)
+                                    .accessibilityAction { select(account.id) }
                             }
-                            Spacer(minLength: 0)
-                            if account.bindings.hosts.isEmpty && account.bindings.bundleIDs.isEmpty {
-                                Image(systemName: "circle.dashed").font(.caption).foregroundStyle(.secondary).help("Add a destination to enable autofill")
-                            }
-                        }.padding(.vertical, 5).tag(account.id)
-                    }.listStyle(.sidebar)
+                        }.padding(.horizontal, 10).padding(.vertical, 2)
+                    }
+                    .focusable()
+                    .hideFocusRing()
+                    .onMoveCommand(perform: moveSelection)
                 }
-                Divider()
                 VStack(alignment: .leading, spacing: 14) {
                     Button { importing = true } label: {
-                        Label("Import accounts", systemImage: "plus").frame(maxWidth: .infinity)
-                    }.controlSize(.large).disabled(vault.loadError != nil || accountBusy)
+                        Label("Import accounts", systemImage: "plus")
+                    }.buttonStyle(.warm(.secondary, large: true, fill: true))
+                        .disabled(vault.loadError != nil || accountBusy || vault.needsMigration)
                     HStack {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Fill a code").font(.system(size: 11)).foregroundStyle(.secondary)
+                            Text("Fill a code").font(.system(size: 11)).foregroundStyle(TouchStyle.muted)
                             ShortcutKeys()
                         }
                         Spacer()
-                        Button { setup = true } label: { Image(systemName: "gearshape").font(.system(size: 16)) }
-                            .buttonStyle(.plain).foregroundStyle(.secondary).help("Autofill setup").accessibilityLabel("Autofill setup")
+                        Button { setup = true } label: { Image(systemName: "gearshape").font(.system(size: 15, weight: .medium)) }
+                            .buttonStyle(.plain).foregroundStyle(TouchStyle.muted).help("Autofill setup").accessibilityLabel("Autofill setup")
                             .keyboardShortcut(",", modifiers: .command)
                     }
                 }.padding(16)
-            }.navigationSplitViewColumnWidth(min: 215, ideal: 245, max: 290)
+                    .overlay(alignment: .top) { Rectangle().fill(TouchStyle.border).frame(height: 1) }
+            }
+            .background(TouchStyle.sidebar)
+            .navigationSplitViewColumnWidth(min: 215, ideal: 245, max: 290)
         } detail: {
             VStack(spacing: 0) {
                 if let error = vault.loadError { InlineNotice(text: error).padding([.horizontal, .top], 20) }
-                if let account = accounts.first(where: { $0.id == selected }) {
+                if vault.needsMigration {
+                    ScrollView {
+                        MigrationPanel(vault: vault).padding(32).frame(maxWidth: 560, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else if let account = accounts.first(where: { $0.id == selected }) {
                     AccountDetail(vault: vault, record: account, dirty: $dirty, isBusy: $accountBusy).id(account.id)
                 } else {
                     welcome
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).background(TouchStyle.background)
         }
+        .tint(TouchStyle.honeyText)
         .frame(minWidth: 780, minHeight: 570)
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -105,7 +120,10 @@ struct ManagerView: View {
                 if let accountID { select(accountID) }
             }
         }
-        .sheet(isPresented: $setup) { SetupView(shortcutAvailable: shortcutAvailable) }
+        .sheet(isPresented: $setup) { SetupView(vault: vault, shortcutAvailable: shortcutAvailable) }
+        .onReceive(NotificationCenter.default.publisher(for: .touchOTPImportRequested)) { _ in
+            if vault.loadError == nil, !vault.needsMigration, !accountBusy { importing = true }
+        }
         .alert("Discard unsaved destinations?", isPresented: $discardChanges) {
             Button("Keep editing", role: .cancel) { pendingSelection = nil }
             Button("Discard changes", role: .destructive) {
@@ -119,6 +137,13 @@ struct ManagerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in accessibility = AXIsProcessTrusted() }
     }
 
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        guard direction == .up || direction == .down, !filtered.isEmpty else { return }
+        let index = filtered.firstIndex { $0.id == selected }
+        let next = index.map { direction == .up ? max(0, $0 - 1) : min(filtered.count - 1, $0 + 1) } ?? 0
+        select(filtered[next].id)
+    }
+
     private func select(_ id: UUID?) {
         guard id != selected, !accountBusy else { return }
         if dirty { pendingSelection = id; discardChanges = true }
@@ -128,24 +153,25 @@ struct ManagerView: View {
     private var welcome: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Image(systemName: "touchid").font(.system(size: 38, weight: .light)).foregroundStyle(Color.accentColor)
-                    .frame(width: 70, height: 70).background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+                Image(systemName: "touchid").font(.system(size: 36, weight: .regular)).foregroundStyle(TouchStyle.onHoney)
+                    .frame(width: 68, height: 68).background(TouchStyle.honey, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                    .shadow(color: TouchStyle.honey.opacity(0.35), radius: 12, y: 5)
                     .padding(.top, 12)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Your codes,\none touch away.").font(.system(size: 30, weight: .semibold)).tracking(-0.7)
+                    Text("Your codes,\none touch away.").font(TouchStyle.title(32)).tracking(-0.6).foregroundStyle(TouchStyle.ink)
                     Text("Bring your authenticator accounts to this Mac.\nUse Touch ID whenever you need a code.")
-                        .font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(3)
+                        .font(.system(size: 14)).foregroundStyle(TouchStyle.muted).lineSpacing(3)
                 }
                 Button { importing = true } label: { Label("Import accounts", systemImage: "qrcode.viewfinder") }
-                    .buttonStyle(.borderedProminent).controlSize(.large).disabled(vault.loadError != nil)
-                Divider()
+                    .buttonStyle(.warm(.primary, large: true)).disabled(vault.loadError != nil || vault.needsMigration)
+                Rectangle().fill(TouchStyle.border).frame(height: 1)
                 VStack(alignment: .leading, spacing: 18) {
                     InstructionRow(number: 1, title: "Scan your accounts", detail: "Import an export QR from Google Authenticator.")
                     InstructionRow(number: 2, title: "Choose where to fill", detail: "Link each account to a website or Mac app.")
                     InstructionRow(number: 3, title: "Use your fingerprint", detail: "Click the code field and press ⌃⌥⌘O.")
                 }
                 Label("Stored locally. Protected by Touch ID.", systemImage: "lock")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(TouchStyle.muted)
             }.padding(32).frame(maxWidth: 530, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -181,35 +207,35 @@ struct AccountDetail: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(alignment: .top, spacing: 14) {
-                        AccountSymbol(issuer: record.issuer, size: 46)
+                        AccountSymbol(issuer: record.issuer, size: 52)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(record.issuer).font(.system(size: 24, weight: .semibold)).tracking(-0.4)
-                            Text(record.username).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
-                        }
+                            Text(record.issuer).font(TouchStyle.title(26)).tracking(-0.4).foregroundStyle(TouchStyle.ink)
+                            Text(record.username).font(.system(size: 13)).foregroundStyle(TouchStyle.muted).textSelection(.enabled)
+                        }.padding(.top, 3)
                         Spacer()
                         Menu {
                             Button("Remove account…", role: .destructive) { deleting = true }
-                        } label: { Image(systemName: "ellipsis.circle").font(.title3) }
+                        } label: { Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(TouchStyle.muted) }
                             .menuStyle(.borderlessButton).fixedSize().help("Account actions").accessibilityLabel("Account actions").disabled(isBusy)
                     }
                     codePanel
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("Autofill destinations").font(.system(size: 15, weight: .semibold))
+                            Text("Autofill destinations").font(TouchStyle.title(16)).foregroundStyle(TouchStyle.ink)
                             Spacer()
-                            Text("\(saved.hosts.count + saved.bundleIDs.count) linked").font(.caption).foregroundStyle(.secondary)
+                            Text("\(saved.hosts.count + saved.bundleIDs.count) linked").font(.caption.weight(.medium)).foregroundStyle(TouchStyle.muted)
                         }
                         Text("Choose the websites and apps that can receive this account’s codes.")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundStyle(TouchStyle.muted)
                         GroupSurface {
                             HStack {
-                                Text("Websites").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                                Text("Websites").font(.system(size: 12, weight: .semibold)).foregroundStyle(TouchStyle.muted)
                                 Spacer()
                                 Button { addingWebsite = true; websiteFocused = true } label: { Label("Add website", systemImage: "plus") }
-                                    .buttonStyle(.borderless).disabled(isBusy)
+                                    .buttonStyle(.warmQuiet).disabled(isBusy)
                             }.padding(14)
                             if draft.hosts.isEmpty && !addingWebsite {
-                                Text("No websites linked").font(.callout).foregroundStyle(.secondary).padding([.horizontal, .bottom], 14)
+                                Text("No websites linked").font(.callout).foregroundStyle(TouchStyle.faint).padding([.horizontal, .bottom], 14)
                             }
                             ForEach(draft.hosts, id: \.self) { host in
                                 destinationRow(name: host, symbol: "globe") { draft.hosts.removeAll { $0 == host } }
@@ -219,31 +245,31 @@ struct AccountDetail: View {
                                     HStack {
                                         TextField("example.com or https://…", text: $website).textFieldStyle(.roundedBorder)
                                             .focused($websiteFocused).onSubmit(addWebsite).accessibilityLabel("Website address")
-                                        Button("Add", action: addWebsite).disabled(website.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                        Button("Add", action: addWebsite).buttonStyle(.warmPrimary).disabled(website.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                         Button { addingWebsite = false; website = ""; websiteError = nil } label: { Image(systemName: "xmark") }
                                             .buttonStyle(.borderless).help("Cancel adding website").accessibilityLabel("Cancel adding website")
                                     }
                                     Text(websiteError ?? "Use the address of the page that asks for your code.")
-                                        .font(.caption).foregroundStyle(websiteError == nil ? Color.secondary : Color.orange)
+                                        .font(.caption).foregroundStyle(websiteError == nil ? TouchStyle.muted : TouchStyle.coral)
                                 }.padding([.horizontal, .bottom], 14).disabled(isBusy)
                             }
-                            Divider()
+                            Rectangle().fill(TouchStyle.border).frame(height: 1)
                             HStack {
-                                Text("Mac apps").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                                Text("Mac apps").font(.system(size: 12, weight: .semibold)).foregroundStyle(TouchStyle.muted)
                                 Spacer()
                                 Button(action: chooseApp) { Label("Choose app…", systemImage: "plus") }
-                                    .buttonStyle(.borderless).disabled(isBusy)
+                                    .buttonStyle(.warmQuiet).disabled(isBusy)
                             }.padding(14)
                             if draft.apps.isEmpty {
-                                Text("No apps linked").font(.callout).foregroundStyle(.secondary).padding([.horizontal, .bottom], 14)
+                                Text("No apps linked").font(.callout).foregroundStyle(TouchStyle.faint).padding([.horizontal, .bottom], 14)
                             }
                             ForEach(draft.apps, id: \.self) { id in
                                 let app = NativeAppPresentation(bundleID: id)
                                 HStack(spacing: 10) {
                                     Image(nsImage: app.icon).resizable().scaledToFit().frame(width: 24, height: 24)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(app.name).font(.callout)
-                                        if !app.installed { Text("Not installed on this Mac").font(.caption).foregroundStyle(.secondary) }
+                                        Text(app.name).font(.callout.weight(.medium)).foregroundStyle(TouchStyle.ink)
+                                        if !app.installed { Text("Not installed on this Mac").font(.caption).foregroundStyle(TouchStyle.muted) }
                                     }
                                     Spacer()
                                     removeButton("Remove \(app.name)") { draft.apps.removeAll { $0 == id } }
@@ -253,25 +279,26 @@ struct AccountDetail: View {
                     }
                     if let message { InlineNotice(text: message, success: succeeded) }
                     HStack(alignment: .top, spacing: 9) {
-                        Image(systemName: "cursorarrow.click").foregroundStyle(.secondary)
+                        Image(systemName: "cursorarrow.click").foregroundStyle(TouchStyle.honeyText)
                         Text("To autofill, click an empty code field in a linked app or website, press **⌃⌥⌘O**, then use Touch ID.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            .font(.caption).foregroundStyle(TouchStyle.muted).fixedSize(horizontal: false, vertical: true)
                     }
                 }.padding(28).frame(maxWidth: 720).frame(maxWidth: .infinity, alignment: .top)
             }
             if dirty {
-                Divider()
                 HStack(spacing: 12) {
-                    Text("Unsaved changes").font(.callout).foregroundStyle(.secondary)
+                    Circle().fill(TouchStyle.honey).frame(width: 7, height: 7)
+                    Text("Unsaved changes").font(.callout.weight(.medium)).foregroundStyle(TouchStyle.ink)
                     Spacer()
-                    Button("Revert") { draft = DestinationDraft(saved); message = nil }.disabled(isBusy)
+                    Button("Revert") { draft = DestinationDraft(saved); message = nil }.buttonStyle(.warmSecondary).disabled(isBusy)
                     Button(action: save) { Label(isBusy ? "Saving…" : "Save changes", systemImage: "touchid") }
-                        .buttonStyle(.borderedProminent).disabled(isBusy).keyboardShortcut("s", modifiers: .command)
-                }.padding(.horizontal, 24).padding(.vertical, 14).background(.bar)
+                        .buttonStyle(.warmPrimary).disabled(isBusy).keyboardShortcut("s", modifiers: .command)
+                }.padding(.horizontal, 24).padding(.vertical, 12).background(TouchStyle.sidebar)
+                    .overlay(alignment: .top) { Rectangle().fill(TouchStyle.border).frame(height: 1) }
             }
         }
         .onChange(of: draft) { value in dirty = value.bindings != saved; message = nil }
-        .onChange(of: record.secretID) { _ in
+        .onChange(of: record.bindings) { _ in
             if !isBusy { saved = DestinationDraft(record.bindings).bindings; draft = DestinationDraft(saved); dirty = false }
         }
         .onDisappear { hideCode() }
@@ -290,57 +317,52 @@ struct AccountDetail: View {
 
     private var codePanel: some View {
         GroupSurface {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("Verification code").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text("Verification code").font(.system(size: 12, weight: .semibold)).foregroundStyle(TouchStyle.muted)
                     Spacer()
-                    Label("Touch ID", systemImage: "lock.fill").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    Label("Touch ID", systemImage: "lock.fill").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(TouchStyle.honeyText)
+                        .padding(.horizontal, 8).padding(.vertical, 3).background(TouchStyle.selection, in: Capsule())
                 }
                 HStack(alignment: .center, spacing: 20) {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(code.map(grouped) ?? "••• •••")
-                            .font(.system(size: 34, weight: .medium, design: .monospaced)).tracking(2)
-                            .foregroundStyle(code == nil ? Color.secondary.opacity(0.5) : Color.primary)
+                        Text(code.map(CodeFormat.grouped) ?? "••• •••")
+                            .font(TouchStyle.code(42)).tracking(1)
+                            .foregroundStyle(code == nil ? TouchStyle.faint : TouchStyle.ink)
                             .textSelection(.enabled).accessibilityLabel(code == nil ? "Code hidden" : "Verification code: \(code!)")
                         if let expires, code != nil {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 HStack(spacing: 6) {
-                                    ZStack {
-                                        Circle().stroke(.primary.opacity(0.08), lineWidth: 2)
-                                        Circle().trim(from: 0, to: max(0, min(1, expires.timeIntervalSince(context.date) / codePeriod)))
-                                            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
-                                    }.frame(width: 12, height: 12)
-                                    Text("Hides in \(max(0, Int(ceil(expires.timeIntervalSince(context.date)))))s")
-                                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                                    let remaining = expires.timeIntervalSince(context.date)
+                                    CountdownRing(fraction: remaining / codePeriod, urgent: remaining < 6, lineWidth: 2.5).frame(width: 13, height: 13)
+                                    Text("Hides in \(max(0, Int(ceil(remaining))))s")
+                                        .font(.caption.weight(.medium)).monospacedDigit().foregroundStyle(TouchStyle.muted)
                                 }
                             }
-                        } else { Text("Unlock to view your current code").font(.caption).foregroundStyle(.secondary) }
+                        } else { Text("Unlock to view your current code").font(.caption).foregroundStyle(TouchStyle.muted) }
                     }
                     Spacer(minLength: 0)
                     if code == nil {
                         Button(action: reveal) { Label(isBusy ? "Waiting…" : "Show code", systemImage: "touchid") }
-                            .buttonStyle(.borderedProminent).controlSize(.large).disabled(isBusy)
+                            .buttonStyle(.warm(.primary, large: true)).disabled(isBusy)
                     } else {
-                        Button("Hide code", action: hideCode).controlSize(.large)
+                        Button(action: hideCode) { Label("Hide code", systemImage: "eye.slash") }.buttonStyle(.warm(.secondary, large: true))
                     }
                 }
             }.padding(20)
         }
     }
-    private func grouped(_ value: String) -> String {
-        let split = value.index(value.startIndex, offsetBy: value.count / 2)
-        return String(value[..<split]) + " " + String(value[split...])
-    }
     private func destinationRow(name: String, symbol: String, remove: @escaping () -> Void) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(.secondary).frame(width: 24)
-            Text(name).font(.callout).textSelection(.enabled)
+            Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(TouchStyle.honeyText)
+                .frame(width: 24, height: 24).background(TouchStyle.selection, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Text(name).font(.callout.weight(.medium)).foregroundStyle(TouchStyle.ink).textSelection(.enabled)
             Spacer()
             removeButton("Remove \(name)", action: remove)
         }.padding(.horizontal, 14).padding(.bottom, 12)
     }
     private func removeButton(_ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: "minus.circle").foregroundStyle(.secondary) }
+        Button(action: action) { Image(systemName: "minus.circle").foregroundStyle(TouchStyle.muted) }
             .buttonStyle(.borderless).help(label).accessibilityLabel(label).disabled(isBusy)
     }
     private func addWebsite() {
@@ -389,5 +411,35 @@ struct AccountDetail: View {
                 if revealGeneration == generation { code = nil; expires = nil }
             } catch { message = error.localizedDescription; succeeded = false; isBusy = false }
         }
+    }
+}
+
+struct SidebarRow: View {
+    let account: AccountRecord
+    let selected: Bool
+    @State private var hovering = false
+    var body: some View {
+        HStack(spacing: 10) {
+            AccountSymbol(issuer: account.issuer, size: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(account.issuer).font(.system(size: 13, weight: .semibold)).foregroundStyle(TouchStyle.ink).lineLimit(1)
+                Text(account.username).font(.system(size: 11)).foregroundStyle(TouchStyle.muted).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if account.bindings.hosts.isEmpty && account.bindings.bundleIDs.isEmpty {
+                Image(systemName: "circle.dashed").font(.caption).foregroundStyle(TouchStyle.faint).help("Add a destination to enable autofill")
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 7)
+        .background(selected ? TouchStyle.selection : hovering ? TouchStyle.well.opacity(0.7) : .clear,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onHover { hovering = $0 }
+    }
+}
+
+extension View {
+    /// The sidebar list takes keyboard focus for arrow keys; its selected row already shows where focus is.
+    @ViewBuilder func hideFocusRing() -> some View {
+        if #available(macOS 14.0, *) { focusEffectDisabled() } else { self }
     }
 }
