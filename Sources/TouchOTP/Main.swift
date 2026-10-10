@@ -15,19 +15,32 @@ struct TouchOTPMain {
     }
 }
 
+extension Notification.Name {
+    /// Posted when the menu bar popover asks the manager window to open its import sheet.
+    static let touchOTPImportRequested = Notification.Name("local.touchotp.importRequested")
+}
+
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let vault = CommandLine.arguments.contains("--render-preview")
         ? Vault(previewAccounts: CommandLine.arguments.contains("--preview-empty") ? [] : PreviewSupport.accounts)
         : Vault()
+    private lazy var codeModel = CodeListModel(vault: vault)
     private let shortcut = GlobalShortcut()
+    private let menu = NSMenu()
     private var statusItem: NSStatusItem!
+    private var popover: NSPopover?
     private var window: NSWindow?
     private var chooser: NSPanel?
     private var busy = false
     private var shortcutAvailable = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--keychain-probe") {
+            print(KeychainProbe.report())
+            NSApp.terminate(nil)
+            return
+        }
         if CommandLine.arguments.contains("--storage-check") {
             Task {
                 let result = await Vault.storageCheck()
@@ -41,20 +54,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let argument = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > argument + 1 {
             let appearance: ColorScheme = CommandLine.arguments.contains("--preview-dark") ? .dark : .light
+            let codes = CommandLine.arguments.contains("--preview-codes")
             let root: AnyView
-            if CommandLine.arguments.contains("--preview-review") {
+            if codes {
+                // Unlocked preview uses published RFC-style seeds, never protected storage.
+                let model = CommandLine.arguments.contains("--preview-locked")
+                    ? CodeListModel(vault: vault)
+                    : CodeListModel(vault: vault, previewUnlocked: PreviewSupport.protectedAccounts)
+                root = AnyView(CodeListView(vault: vault, model: model).preferredColorScheme(appearance))
+            } else if CommandLine.arguments.contains("--preview-review") {
                 root = AnyView(ImportView(vault: vault, previewCollector: PreviewSupport.importCollector).preferredColorScheme(appearance))
             } else if CommandLine.arguments.contains("--preview-complete") {
                 root = AnyView(ImportView(vault: vault, previewImported: true).preferredColorScheme(appearance))
             } else if CommandLine.arguments.contains("--preview-import") {
                 root = AnyView(ImportView(vault: vault).preferredColorScheme(appearance))
             } else if CommandLine.arguments.contains("--preview-setup") {
-                root = AnyView(SetupView(shortcutAvailable: true).preferredColorScheme(appearance))
+                root = AnyView(SetupView(vault: vault, shortcutAvailable: true).preferredColorScheme(appearance))
             } else {
                 root = AnyView(ManagerView(vault: vault, shortcutAvailable: true).preferredColorScheme(appearance))
             }
             let view = NSHostingView(rootView: root)
-            let size = CommandLine.arguments.contains("--preview-compact") ? NSSize(width: 780, height: 570) : NSSize(width: 900, height: 650)
+            let size: NSSize
+            if codes {
+                let fitting = view.fittingSize
+                size = fitting.height > 0 ? fitting : NSSize(width: 340, height: 480)
+            } else {
+                size = CommandLine.arguments.contains("--preview-compact") ? NSSize(width: 780, height: 570) : NSSize(width: 900, height: 650)
+            }
             let previewWindow = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
             previewWindow.appearance = NSAppearance(named: appearance == .dark ? .darkAqua : .aqua)
             previewWindow.contentView = view
@@ -73,8 +99,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "touchid", accessibilityDescription: "TouchOTP")
-        statusItem.button?.toolTip = "TouchOTP · ⌃⌥⌘O to fill"
-        let menu = NSMenu()
+        statusItem.button?.toolTip = "TouchOTP · Click for codes · ⌃⌥⌘O to fill"
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        let codes = NSMenuItem(title: "Show codes…", action: #selector(showCodes), keyEquivalent: "")
+        codes.target = self; menu.addItem(codes)
         let fill = NSMenuItem(title: "Fill current field     ⌃⌥⌘O", action: #selector(fillCurrent), keyEquivalent: "")
         fill.target = self; menu.addItem(fill)
         let manage = NSMenuItem(title: "Manage accounts…", action: #selector(showManager), keyEquivalent: "")
@@ -82,7 +112,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit TouchOTP", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
-        statusItem.menu = menu
         shortcut.action = { [weak self] in self?.fillCurrent() }
         shortcutAvailable = shortcut.register()
         showManager()
@@ -90,6 +119,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showManager(); return true
+    }
+
+    // MARK: Menu bar
+
+    @objc private func statusItemClicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            // The classic menu does not activate TouchOTP, so "Fill current field" still targets the front app.
+            statusItem.menu = menu
+            statusItem.button?.performClick(nil)
+            statusItem.menu = nil
+        } else {
+            togglePopover()
+        }
+    }
+
+    @objc func showCodes() {
+        if popover?.isShown != true { togglePopover() }
+    }
+
+    private func togglePopover() {
+        if let popover, popover.isShown { popover.performClose(nil); return }
+        guard let button = statusItem.button else { return }
+        let popover = self.popover ?? makePopover()
+        self.popover = popover
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    private func makePopover() -> NSPopover {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.delegate = self
+        let root = CodeListView(vault: vault, model: codeModel, manage: { [weak self] in
+            self?.showManager()
+            self?.popover?.performClose(nil)
+        }, importAccounts: { [weak self] in
+            self?.showManager()
+            self?.popover?.performClose(nil)
+            NotificationCenter.default.post(name: .touchOTPImportRequested, object: nil)
+        }, quit: { NSApp.terminate(nil) })
+        let controller = NSHostingController(rootView: root)
+        controller.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = controller
+        return popover
+    }
+
+    /// Keep the popover up while a Touch ID sheet is attached to it; a dismissed popover drops the codes.
+    func popoverShouldClose(_ popover: NSPopover) -> Bool {
+        !codeModel.busy && popover.contentViewController?.view.window?.attachedSheet == nil
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        codeModel.lock()
+        // Return focus to the app the user came from when nothing else of ours is open.
+        if window?.isVisible != true, chooser == nil { NSApp.hide(nil) }
     }
 
     @objc func showManager() {
@@ -100,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             created.setContentSize(NSSize(width: 900, height: 650))
             created.contentMinSize = NSSize(width: 780, height: 570)
             created.titlebarAppearsTransparent = true
+            created.backgroundColor = NSColor(TouchStyle.background)
             created.toolbarStyle = .unified
             created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             created.isReleasedWhenClosed = false
@@ -110,12 +196,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    // MARK: Autofill
+
     @objc func fillCurrent() {
         guard !busy else { return }
         busy = true
         FillDiagnostics.begin()
         Task {
             do {
+                guard !vault.needsMigration else { throw OTPError(Vault.migrationMessage) }
                 let target = try await TargetReader.capture()
                 FillDiagnostics.stage(.matchAccount)
                 let matches = vault.accounts.filter(target.matches)
@@ -172,10 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 FillDiagnostics.finish(.completed)
             } catch {
                 FillDiagnostics.finish(.failed)
-                let nsError = error as NSError
-                if nsError.domain != LAError.errorDomain || ![LAError.userCancel.rawValue, LAError.systemCancel.rawValue, LAError.appCancel.rawValue].contains(nsError.code) {
-                    present(error)
-                }
+                if !Vault.isCancellation(error) { present(error) }
             }
         }
     }
@@ -197,26 +283,29 @@ struct AccountChooser: View {
     let cancel: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Choose an account").font(.headline)
-            Text("Confirm with Touch ID next.").font(.caption).foregroundStyle(.secondary)
+            Text("Choose an account").font(TouchStyle.title(15)).foregroundStyle(TouchStyle.ink)
+            Text("Confirm with Touch ID next.").font(.caption).foregroundStyle(TouchStyle.muted)
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(accounts) { account in
                         Button { select(account) } label: {
                             HStack(spacing: 10) {
                                 AccountSymbol(issuer: account.issuer, size: 30)
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(account.issuer).font(.system(size: 13, weight: .medium))
-                                    Text(account.username).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(account.issuer).font(.system(size: 13, weight: .semibold)).foregroundStyle(TouchStyle.ink)
+                                    Text(account.username).font(.caption).foregroundStyle(TouchStyle.muted).lineLimit(1)
                                 }
                                 Spacer()
-                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.buttonStyle(.bordered)
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(TouchStyle.faint)
+                            }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(TouchStyle.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(TouchStyle.border))
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
                 }
             }
-            Button("Cancel", action: cancel)
-        }.padding(20).frame(width: 350, height: 230)
+            Button("Cancel", action: cancel).buttonStyle(.warmSecondary)
+        }.padding(20).frame(width: 350, height: 230).background(TouchStyle.background)
     }
 }

@@ -10,12 +10,18 @@ enum PreviewSupport {
         }
         return collector
     }
-    static var accounts: [AccountRecord] {
-        [
-            AccountRecord(issuer: "OpenVPN", username: "alex@example.com", bindings: Bindings(bundleIDs: ["org.openvpn.client.app"])),
-            AccountRecord(issuer: "GitHub", username: "alex-morgan", bindings: Bindings(hosts: ["github.com"])),
-            AccountRecord(issuer: "Google", username: "alex@example.com", bindings: Bindings(hosts: ["accounts.google.com"])),
-            AccountRecord(issuer: "AWS", username: "alex · personal", bindings: Bindings())
-        ]
+    // Stored once so the preview vault and the unlocked code list agree on account identities.
+    static let accounts: [AccountRecord] = [
+        AccountRecord(issuer: "OpenVPN", username: "alex@example.com", bindings: Bindings(bundleIDs: ["org.openvpn.client.app"])),
+        AccountRecord(issuer: "GitHub", username: "alex-morgan", bindings: Bindings(hosts: ["github.com"])),
+        AccountRecord(issuer: "Google", username: "alex@example.com", bindings: Bindings(hosts: ["accounts.google.com"])),
+        AccountRecord(issuer: "AWS", username: "alex · personal", bindings: Bindings())
+    ]
+    /// Synthetic seeds derived from the sample names, for the unlocked code-list preview only.
+    static var protectedAccounts: [ProtectedAccount] {
+        accounts.compactMap { record in
+            (try? OTPSecret(issuer: record.issuer, username: record.username, secret: Data((record.issuer + " preview seed").utf8)))
+                .map { ProtectedAccount(record: record, otp: $0) }
+        }
     }
 }
