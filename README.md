@@ -75,7 +75,7 @@ Only time-based codes (TOTP), SHA-1/SHA-256/SHA-512, and 6/8 digits are supporte
 Requirements: macOS 13+, a Mac with Touch ID, Xcode, XcodeGen, and a development account signed in to Xcode. There are no third-party Swift packages.
 
 ```sh
-cd /Users/pratikaman/Downloads/TouchOTP
+git clone https://github.com/pratikaman/TouchOTP.git && cd TouchOTP
 swift test
 ./scripts/build.sh
 ./scripts/install.sh
