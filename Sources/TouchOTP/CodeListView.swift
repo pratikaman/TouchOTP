@@ -13,6 +13,10 @@ final class CodeListModel: ObservableObject {
     @Published var message: String?
     private let vault: Vault
     private var relock: Task<Void, Never>?
+    /// Supplied by the app delegate: a window anchored to the popover that hosts the Touch ID sheet, and a
+    /// callback to put it away once authentication ends.
+    var touchIDHost: () -> NSWindow? = { nil }
+    var touchIDEnded: () -> Void = {}
 
     init(vault: Vault, previewUnlocked: [ProtectedAccount]? = nil) {
         self.vault = vault
@@ -32,9 +36,9 @@ final class CodeListModel: ObservableObject {
     func reveal() async {
         guard !busy else { return }
         busy = true; message = nil
-        defer { busy = false }
+        defer { busy = false; touchIDEnded() }
         do {
-            let vault = try await vault.unlockAll(reason: "Show your verification codes")
+            let vault = try await vault.unlockAll(reason: "Show your verification codes", presentingIn: touchIDHost())
             unlocked = vault.accounts
             unlockedUntil = Date().addingTimeInterval(Self.visibleFor)
             relock?.cancel()
@@ -137,13 +141,43 @@ struct CodeListView: View {
                         Label("Codes hide in \(max(0, Int(ceil(until.timeIntervalSince(context.date)))))s or when this closes", systemImage: "lock")
                             .font(.caption).monospacedDigit().foregroundStyle(TouchStyle.muted)
                     }
+                } else if model.busy {
+                    TouchIDWaiting()
                 } else if !model.isUnlocked {
                     Button { Task { await model.reveal() } } label: {
-                        Label(model.busy ? "Waiting for Touch ID…" : "Show codes with Touch ID", systemImage: "touchid")
-                    }.buttonStyle(.warm(.primary, large: true, fill: true)).disabled(model.busy)
+                        Label("Show codes with Touch ID", systemImage: "touchid")
+                    }.buttonStyle(.warm(.primary, large: true, fill: true))
                 }
                 if let message = model.message { InlineNotice(text: message) }
             }.padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 14)
+        }
+    }
+}
+
+/// Shown in place of the reveal button while the Touch ID prompt is up, so the popover itself says what to do.
+struct TouchIDWaiting: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "touchid").font(.system(size: 21, weight: .medium)).foregroundStyle(TouchStyle.honeyText)
+                .frame(width: 40, height: 40)
+                .background(TouchStyle.selection, in: Circle())
+                .overlay(Circle().strokeBorder(TouchStyle.honey, lineWidth: 2).scaleEffect(pulse ? 1.18 : 1).opacity(pulse ? 0 : 0.8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Touch the fingerprint sensor").font(.system(size: 13, weight: .semibold)).foregroundStyle(TouchStyle.ink)
+                Text("Rest your finger on Touch ID to show your codes, or choose Cancel in the prompt.")
+                    .font(.caption).foregroundStyle(TouchStyle.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(TouchStyle.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(TouchStyle.honey.opacity(0.6)))
+        .accessibilityElement(children: .combine)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { pulse = true }
         }
     }
 }

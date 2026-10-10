@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var popover: NSPopover?
     private var window: NSWindow?
     private var chooser: NSPanel?
+    private var touchIDHost: NSWindow?
     private var busy = false
     private var shortcutAvailable = false
 
@@ -163,7 +164,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let controller = NSHostingController(rootView: root)
         controller.sizingOptions = [.preferredContentSize]
         popover.contentViewController = controller
+        codeModel.touchIDHost = { [weak self] in self?.showTouchIDHost() }
+        codeModel.touchIDEnded = { [weak self] in self?.hideTouchIDHost() }
         return popover
+    }
+
+    /// Touch ID for the popover is presented against this transparent strip along the popover's bottom edge.
+    /// Left to itself, macOS attaches the prompt as a sheet to whichever window is key: inside the popover it
+    /// can draw blank, and with the manager window open it lands there, hidden. Given this window instead,
+    /// macOS shows its standalone Touch ID dialog, which runs in a separate system agent. That dialog only
+    /// arms the sensor once it has focus, and since macOS 14 an active app must yield activation before
+    /// another app can take it; without the yield, the dialog stays gray and ignores fingers.
+    private func showTouchIDHost() -> NSWindow? {
+        guard let anchor = popover?.contentViewController?.view.window, anchor.isVisible else { return nil }
+        let host = touchIDHost ?? {
+            let window = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: true)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = false
+            window.ignoresMouseEvents = true
+            window.isReleasedWhenClosed = false
+            touchIDHost = window
+            return window
+        }()
+        host.level = anchor.level
+        host.setFrame(NSRect(x: anchor.frame.minX, y: anchor.frame.minY - 2, width: anchor.frame.width, height: 2), display: false)
+        host.orderFront(nil)
+        if #available(macOS 14.0, *) {
+            NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.apple.LocalAuthentication.UIAgent")
+        }
+        return host
+    }
+
+    private func hideTouchIDHost() {
+        guard let host = touchIDHost, host.isVisible else { return }
+        host.orderOut(nil)
+        // Take focus back from the Touch ID agent so the popover's buttons respond right away.
+        if popover?.isShown == true { NSApp.activate(ignoringOtherApps: true) }
     }
 
     /// Keep the popover up while a Touch ID sheet is attached to it; a dismissed popover drops the codes.
