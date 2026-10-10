@@ -8,6 +8,8 @@ Version **0.3.0** adds a menu bar code list. Clicking the fingerprint icon opens
 
 The 0.3.0 interface also gets a warmer look with its own palette in place of the system accent color: linen and walnut tones (warm charcoal in dark mode), a honey accent, rounded numerals for codes, and a tinted initial tag for each account.
 
+While **Show codes with Touch ID** waits, the popover says to touch the fingerprint sensor, and macOS shows its standard Touch ID dialog. Earlier 0.3.0 builds could show that prompt as a blank panel inside the popover, or hide it behind the manager window.
+
 ![TouchOTP menu bar code list with synthetic sample accounts](docs/ui/codes-light.png)
 
 ![TouchOTP account screen with synthetic sample accounts](docs/ui/account-light.png)

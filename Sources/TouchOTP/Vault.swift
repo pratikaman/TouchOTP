@@ -1,5 +1,7 @@
 import Foundation
+import AppKit
 import LocalAuthentication
+import LocalAuthenticationEmbeddedUI
 import TouchOTPCore
 
 /// On-disk index: public metadata plus the identifier of the single protected right. No seeds.
@@ -135,11 +137,14 @@ final class Vault: ObservableObject {
         lhs.sorted { $0.id.uuidString < $1.id.uuidString } == rhs.sorted { $0.id.uuidString < $1.id.uuidString }
     }
 
-    private func readVault(_ vaultID: String, reason: String) async throws -> ProtectedVault {
+    /// `presentingIn` pins the Touch ID sheet to a window. Without it, macOS attaches the sheet to whichever
+    /// window is key, which may be hidden behind the menu bar popover or fail to draw inside it.
+    private func readVault(_ vaultID: String, reason: String, presentingIn window: NSWindow? = nil) async throws -> ProtectedVault {
         try Self.checkBiometry()
         let right = try await store.right(forIdentifier: rightIdentifier(vaultID))
         do {
-            try await right.authorize(localizedReason: reason)
+            if let window { try await right.authorize(localizedReason: reason, in: window) }
+            else { try await right.authorize(localizedReason: reason) }
             let data = try await right.secret.rawData
             await right.deauthorize()
             let vault = try JSONDecoder().decode(ProtectedVault.self, from: data)
@@ -154,11 +159,11 @@ final class Vault: ObservableObject {
     }
 
     /// One Touch ID prompt decrypts every seed. The protected copy of the metadata must match the index.
-    func unlockAll(reason: String) async throws -> ProtectedVault {
+    func unlockAll(reason: String, presentingIn window: NSWindow? = nil) async throws -> ProtectedVault {
         guard !previewMode else { throw OTPError("Preview accounts have no stored secrets.") }
         guard !needsMigration else { throw OTPError(Self.migrationMessage) }
         guard let vaultID else { throw OTPError("No accounts have been imported yet.") }
-        return try await readVault(vaultID, reason: reason)
+        return try await readVault(vaultID, reason: reason, presentingIn: window)
     }
 
     func unlock(_ record: AccountRecord, reason: String) async throws -> ProtectedAccount {
